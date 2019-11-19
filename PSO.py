@@ -41,8 +41,12 @@ class PSO():
         G = np.zeros(self.x_dim).astype(np.double)
         return G
 
-    def update_Sigma(self, sigma, fx, W):
-        nfx = np.sort(fx)
+    def update_Sigma(self, sigma, func, x, W):
+        fx = func(x)
+        # nfx = np.sort(fx)
+        index = np.argsort(fx)
+        nfx = np.take_along_axis(fx, index, axis=0)
+        nx = np.take_along_axis(x, np.tile(np.expand_dims(index, axis=-1), (1,self.x_dim)), axis=0)
         FitX = np.zeros(self.M)
         for i in range(self.M):
             FitX[i] = np.mean(nfx[(i*self.P):((i+1)*self.P)])
@@ -50,7 +54,7 @@ class PSO():
         FitX_max = np.max(FitX)
         FitX_min = np.min(FitX)
         # print(sigma)
-        sigma = (sigma)*(np.exp((self.M*FitX-np.sum(FitX))/(FitX_max-FitX_min+1e-300))+0.01)
+        sigma = (sigma)*(np.exp((self.M*FitX-np.sum(FitX))/(FitX_max-FitX_min+1e-300)))
         Treshhold = W/4.0
         sigma %= Treshhold 
         sigma += 1e-300
@@ -59,25 +63,27 @@ class PSO():
         # sigma = sigma*w + b
         # sigma %= W/4.0
         # sigma += 1e-300
+        # nx = 0
 
-        return sigma
+        return sigma, nx
 
     def update_V(self, v, x, pb, gb, i):
         w = self.w[0]- (1.0*i/(1.0*self.maxK))*(self.w[0]-self.w[1])
-        nv = w*v + self.c1*np.random.rand()*(pb-x)+self.c1*np.random.rand()*(gb-x)
+        nv = w*v + self.c1*np.random.rand()*(pb-x) + self.c1*np.random.rand()*(gb-x)
         return nv
 
     def escape(self, v, x, func, Td, G, sigma, Vmax):
-        fx = func(x+np.sign(v+1e-300)*np.random.rand(*x.shape)*Vmax)
+        rmax = np.sign(np.random.randn())*np.random.rand(*v.shape)*Vmax
+        rsig = np.random.randn(*v.shape)
+
+        fx = func(x+rmax)
         tmpx = np.repeat(x,self.M,0)
-        tmpx += np.random.randn(*tmpx.shape)*np.expand_dims(np.tile(sigma,self.N),-1)
+        tmpx += np.repeat(rsig,self.M,0)*np.expand_dims(np.tile(sigma,self.N),-1)
+        # tmpx += np.tile(rsig,(self.M,1))*np.expand_dims(np.tile(sigma,self.N),-1)
         tmpf = func(tmpx)
         tmpfx = np.zeros(fx.shape)
         for i in range(self.N):
             tmpfx = np.min(tmpf[(i*self.M):((i+1)*self.M)])
-
-        rsig = np.random.randn(*v.shape)*np.expand_dims(np.repeat(sigma,self.P,0),-1)
-        rmax = np.sign(v+1e-300)*np.random.rand(*v.shape)*Vmax
 
         mask_vtd = np.abs(v)<Td
         mask_fx = np.repeat(np.expand_dims(tmpfx<fx,-1),self.x_dim,-1)
@@ -115,11 +121,12 @@ class PSO():
         plt_gbfx = gbfx*1.0
         for i in range(self.maxK):
             print(func(gb))
+            # print(gb)
             fx = func(x)
             mask = fx<pbfx
             pbfx[mask] = fx[mask]*1.0
             pb[mask] = x[mask]*1.0
-            if gbfx > np.min(pbfx):
+            if gbfx >= np.min(pbfx):
                 gbfx = np.min(pbfx)*1.0
                 gb = pb[pbfx.argmin()]*1.0
             
@@ -130,7 +137,7 @@ class PSO():
             x += v
             x[x>np.max(region)] = np.max(region)
             x[x<np.min(region)] = np.min(region)
-            sigma = self.update_Sigma(sigma, fx, W)
+            sigma, _ = self.update_Sigma(sigma, func, x, W)
 
             plt_sigma = np.hstack([plt_sigma,np.expand_dims(sigma,-1)])
             plt_x = np.hstack([plt_x, i])
@@ -148,7 +155,7 @@ if __name__ == "__main__":
     plt.rcParams['font.sans-serif'] = ['Arial Unicode MS']
     
     model = PSO(5, 20, 6000, 30, [0.95, 0.4], 1.4, 1.4, 5, 10)
-    gbfx, gb, plt_sigma, plt_x, plt_gbfx = model.find_min(Tablet, [-100, 100])
+    gbfx, gb, plt_sigma, plt_x, plt_gbfx = model.find_min(Quadric, [-100, 100])
     print(gbfx, gb)
     plt.figure()
     for i in range(model.M):
